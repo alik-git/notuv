@@ -1,221 +1,376 @@
-# Python Package Template
+# notuv
 
-A minimal template for building a modern Python package.
+Editable Python installs in git worktrees without copying heavy dependencies.
 
-This template includes a standard `src/` package layout, Ruff formatting and
-linting, mypy type checking, pytest, optional pre-commit hooks, GitHub Actions
-CI, and package build checks for both pip and uv workflows.
+`notuv` runs commands inside a shared conda environment with a
+git-worktree-local `.venv` overlay. Use it when conda owns the heavy dependency
+stack and each worktree needs its own editable Python installs.
 
-## Template Setup
+## Why
 
-1. Pick a package name.
+If you have ever used Git worktrees for deep learning, you might be familiar
+with the following problem:
 
-   Use a short lowercase import name like `numpy` or `pandas`. The import
-   package name is usually underscore-separated, while the PyPI/project name may
-   use hyphens.
+You are working on your project as an editable package installed locally,
+you have a conda env with big heavy packages like PyTorch and CUDA, and then
+you make a new git worktree to work on a feature in parallel.
 
-2. Rename the package folder:
+You run your code and it does not behave as expected, because the editable
+Python package was still pointing to your original repo, not the new worktree.
+Ouch.
 
-   ```bash
-   mv src/mypackage src/your_package_name
-   ```
+So now you either have install the worktree as an editable package, which
+breaks your original repo!
 
-3. Replace `mypackage` with your package name in:
+Or you can set PYTHONPATH= each time you run a command! Ew!
 
-   - `name`
-   - `[project.urls]`
-   - `[project.scripts]`
-   - Ruff `known-first-party`
-   - mypy `files`
-   - `tests/test_package.py`
-   - `AGENTS.md`
-   - this README
+Or you can just set up a new conda env to stay sane, but then after 3 worktrees
+you have 25GB of conda envs on your machine!
 
-   Most of these are in [`pyproject.toml`](pyproject.toml).
+`notuv` solves this specific problem:
 
-4. Fill in basic package metadata in [`pyproject.toml`](pyproject.toml):
+- one shared conda env owns the heavy dependency stack
+- each worktree gets a tiny `.venv` overlay for its editable installs
+- `notuv.toml` says which conda env and editable packages belong to that
+  worktree
+- `notuv <command>` runs inside the conda env, then puts the worktree `.venv`
+  first
 
-   - `description`
-   - `authors`
-   - `maintainers`
-   - `keywords`
-   - `classifiers`
+`notuv` keeps the split explicit:
 
-5. Add a license if the package will be public or open source. The files under
-   [`templates/licenses`](templates/licenses) are templates only and do not
-   license this repository.
+- conda env: heavy shared dependencies
+- worktree `.venv`: editable local packages and console scripts
+- `notuv.toml`: the worktree's configuration
 
-   ```bash
-   cp templates/licenses/MIT LICENSE
-   ```
+You do not need to `conda activate` the shared environment before running
+`notuv` commands. `notuv` reads `notuv.toml`, applies the configured conda
+environment to the child process, and keeps the worktree `.venv/bin` first on
+`PATH`.
 
-   or:
+## Install
 
-   ```bash
-   cp templates/licenses/Apache-2.0 LICENSE
-   ```
-
-   Then replace the copyright placeholder and add the matching `license` value
-   in `pyproject.toml`, either `MIT` or `Apache-2.0`.
-
-   After choosing a license, the templates can be removed.
-
-6. Add your code under `src/your_package_name/` and, if needed, expose a public
-   API from `src/your_package_name/__init__.py`.
-
-7. Update this README as needed for the package you are building.
-
-8. If you plan to publish to PyPI, update the release workflow and trusted
-   publisher settings as described in [Publishing](#publishing).
-
-## Installation
-
-Recommended with `uv`:
+From PyPI:
 
 ```bash
-uv sync --extra dev
+python -m pip install notuv
 ```
 
-This repository commits `.python-version` and `uv.lock` so the uv workflow uses
-Python 3.11 by default and resolves reproducible dependency versions. After
-changing package metadata or dependencies, update the lockfile with:
-
-```bash
-uv lock
-```
-
-Standard Python fallback:
+For development from this checkout:
 
 ```bash
 python -m pip install -e ".[dev]"
 ```
 
-Conda can still own the outer environment if needed:
+Check the command:
 
 ```bash
-conda create -n mypackage python=3.11
-conda activate mypackage
-python -m pip install -e ".[dev]"
+notuv --help
 ```
 
-## Getting Started
+## Quick Start
 
-Run the starter Python API:
-
-```python
-import mypackage
-
-result = mypackage.do_useful_thing("world")
-```
-
-Run the starter CLI:
+Create one shared conda environment that has your normal dependencies, but not
+the editable package you are developing:
 
 ```bash
-mypackage
+conda create -n myproject-shared python=3.11 pip -y
+conda run -n myproject-shared python -m pip install -U pip
 ```
 
-## Development Workflow
+For a real project, this is where you install PyTorch, CUDA-related packages,
+MuJoCo, Isaac Sim, or whatever heavy dependencies the project needs.
 
-Run the standard checks before opening a PR:
+In a git worktree, add `notuv.toml` at the git root:
+
+```toml
+[python]
+base_conda_env = "myproject-shared"
+
+[editables]
+packages = [
+  ".",
+]
+```
+
+Create the worktree `.venv` and install configured editables:
 
 ```bash
-uv run ruff format --check .
-uv run ruff check .
-uv run mypy
-uv run pytest
-uv build
+notuv update-editables
 ```
 
-If you are using standard Python tools instead of uv:
+Run commands through the worktree environment:
 
 ```bash
-python -m ruff format --check .
-python -m ruff check .
-python -m mypy
-python -m pytest
-python -m build
+notuv python -c "import sys; print(sys.executable)"
+notuv pytest
+notuv python scripts/example.py
 ```
 
-Pre-commit is included in the development dependencies but is optional. To run
-the hooks manually:
+These commands do not require `conda activate myproject-shared` first. The
+configured conda env still supplies native libraries, activation-script
+environment variables, and shared dependencies.
+
+Verify that your editable package is imported from the current worktree:
 
 ```bash
-python -m pre_commit run --all-files
+notuv python -c "import your_package; print(your_package.__file__)"
 ```
 
-To enable local checks before each commit:
+## Worktree-Local Config
+
+If `notuv.toml` is local machine config, ignore it with the git worktree's
+exclude file. In git worktrees, `.git` may be a file, so use `git rev-parse`:
 
 ```bash
-uv run pre-commit install
+EXCLUDE="$(git rev-parse --git-path info/exclude)"
+mkdir -p "$(dirname "$EXCLUDE")"
+printf '\n# Local notuv config\n/notuv.toml\n/.venv/\n' >> "$EXCLUDE"
 ```
 
-## Project Layout
+If `notuv.toml` should be shared by the team, commit it instead and only ignore
+`.venv/`.
+
+## Multiple Editable Packages
+
+One worktree can own an environment for several local packages:
+
+```toml
+[python]
+base_conda_env = "myproject-shared"
+
+[editables]
+packages = [
+  ".",
+  "../some-sibling-package",
+  "~/Projects/repos/some-canonical-package",
+  "../another-sibling-package",
+]
+```
+
+Relative editable paths are resolved from the git root. Editable paths may also
+use absolute paths or `~`, which is useful for canonical shared checkouts such
+as `~/Projects/repos/IsaacLab`. The `.venv` path defaults to `.venv` and must
+stay inside the git root.
+
+## Explicit Stack Configs
+
+Several repos can share one dependency stack when they belong to the same local
+development context. Keep that relationship explicit with a small repo-local
+pointer config:
 
 ```text
-src/mypackage/
-  __init__.py   # public import surface
-  package.py    # reusable package logic
-  cli.py        # command-line boundary
-  py.typed      # marker for typed packages
+worksets/my-feature/
+  notuv.backend.toml
+  .notuv/backend/.venv
 
-tests/
-  test_package.py
+  api-service/
+    notuv.toml
+
+  worker-service/
+    notuv.toml
 ```
 
-## CI / GitHub Actions
+The shared stack config owns the base conda env, venv, and editable packages:
 
-GitHub Actions runs:
+```toml
+# worksets/my-feature/notuv.backend.toml
+[notuv]
+kind = "stack"
 
-- fast Ruff-only checks
-- Ruff, mypy, and pytest
-- package build and wheel smoke test with pip
-- package build and wheel smoke test with uv
+[python]
+base_conda_env = "backend-shared"
+venv = ".notuv/backend/.venv"
 
-The release workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml)
-builds and publishes the package to PyPI when a GitHub Release is published.
+[editables]
+packages = [
+  "api-service",
+  "worker-service",
+  "~/Projects/repos/shared-library",
+]
+```
 
-Local pre-commit hooks are not installed automatically. Running
-`pre-commit install` is optional.
+Each repo opts into that stack explicitly:
 
-## Publishing
+```toml
+# worksets/my-feature/api-service/notuv.toml
+[notuv]
+extends = "../notuv.backend.toml"
+```
 
-This template is not meant to be published to PyPI as-is. After copying the
-template for a real package, rename the project in [`pyproject.toml`](pyproject.toml)
-and use PyPI Trusted Publishing for releases.
+Run commands from the repo you are working in:
 
-1. Create or log in to your PyPI account.
-2. Go to <https://pypi.org/manage/account/publishing/>.
-3. Add a pending trusted publisher with:
+```bash
+cd worksets/my-feature/api-service
+notuv info
+notuv update-editables
+notuv pytest
+```
 
-   ```text
-   PyPI project name: <project name from pyproject.toml>
-   Owner: <GitHub owner or organization>
-   Repository name: <GitHub repository name>
-   Workflow name: release.yml
-   Environment name: pypi
-   ```
+Commands run from the active repo root, while relative paths in the stack config
+resolve from the stack config directory. A workset can have more than one stack
+config when repos need different base conda environments.
 
-4. Commit and push the package metadata and release workflow.
-5. Create a GitHub Release for the version in [`pyproject.toml`](pyproject.toml):
+Stack venvs may be shared by several repos. `notuv clean` refuses to remove a
+shared stack venv unless you say so explicitly:
 
-   ```bash
-   gh release create v0.1.0 \
-     --title "v0.1.0" \
-     --notes "Initial release."
-   ```
+```bash
+notuv clean --shared
+```
 
-Publishing is release-driven on purpose: normal pushes and pull requests build
-and test the package, but only GitHub Releases publish to PyPI.
+## Commands
 
-## Documentation
+Show configuration without creating `.venv`:
 
-Project documentation lives in [`docs/`](docs/):
+```bash
+notuv info
+```
 
-- [`docs/api.md`](docs/api.md): public API notes and examples
-- [`docs/ci-private-submodules.md`](docs/ci-private-submodules.md): GitHub
-  Actions setup for private submodules
+Create `.venv` if needed and install configured editables:
+
+```bash
+notuv update-editables
+```
+
+Run normal commands inside the configured conda env, with `.venv/bin` first on
+`PATH`:
+
+```bash
+notuv python -m pytest
+notuv pytest
+notuv my-console-script --help
+```
+
+Remove the worktree `.venv`:
+
+```bash
+notuv clean
+```
+
+Remove a shared stack `.venv`:
+
+```bash
+notuv clean --shared
+```
+
+## Editable Installs
+
+Editable installs are configured in `notuv.toml`, not through ad hoc pip
+commands.
+
+These intentionally fail:
+
+```bash
+notuv pip install -e .
+notuv pip install --editable ../some-package
+notuv python -m pip install -e .
+```
+
+Use this instead:
+
+```toml
+[editables]
+packages = [
+  ".",
+  "../some-package",
+]
+```
+
+```bash
+notuv update-editables
+```
+
+By default, `update-editables` uses `pip install --no-deps -e ...` because the
+base conda environment is expected to own dependencies. If a repo really needs
+editable dependencies installed into `.venv`, set:
+
+```toml
+[editables]
+install_deps = true
+packages = ["."]
+```
+
+## Config Reference
+
+Repo-local config:
+
+```toml
+[python]
+base_conda_env = "myproject-shared"
+venv = ".venv"
+
+[editables]
+packages = ["."]
+install_deps = false
+```
+
+Pointer config:
+
+```toml
+[notuv]
+extends = "../notuv.backend.toml"
+```
+
+Stack config:
+
+```toml
+[notuv]
+kind = "stack"
+
+[python]
+base_conda_env = "backend-shared"
+venv = ".notuv/backend/.venv"
+
+[editables]
+packages = ["api-service", "worker-service"]
+install_deps = false
+```
+
+Fields:
+
+- `notuv.extends`: optional path from a repo-local pointer config to one stack
+  config.
+- `notuv.kind`: set to `"stack"` in stack configs.
+- `python.base_conda_env`: required conda environment name.
+- `python.venv`: optional virtual environment path. Defaults to `.venv`. In
+  repo configs, it must stay inside the repo root. In stack configs, it must
+  stay inside the stack config directory. Absolute paths are accepted only when
+  they remain inside the allowed root.
+- `editables.packages`: editable package paths. Relative paths resolve from the
+  config file that declares them. Absolute paths and `~` are also accepted.
+- `editables.install_deps`: whether pip should install dependencies while
+  installing editables. Defaults to `false`.
 
 ## Troubleshooting
 
-Add project-specific troubleshooting notes here when setup or runtime issues
-come up repeatedly.
+If `notuv` is not found, install it in the active Python environment:
+
+```bash
+python -m pip install --upgrade notuv
+```
+
+If `notuv` says `missing notuv.toml`, make sure you are inside a git worktree
+and that `notuv.toml` exists at the git root:
+
+```bash
+git rev-parse --show-toplevel
+```
+
+If imports come from the wrong place, check the active paths:
+
+```bash
+notuv info
+notuv python -c "import your_package; print(your_package.__file__)"
+```
+
+If `.venv` gets stale, remove and recreate it:
+
+```bash
+notuv clean
+notuv update-editables
+```
+
+## Unsupported By Design
+
+Version 1 does not support uv-managed environments, non-conda base
+environments, or automatic dependency solving. Those can be added later if the
+conda-backed overlay workflow proves useful.

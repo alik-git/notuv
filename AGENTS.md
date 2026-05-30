@@ -1,18 +1,23 @@
 # AGENTS.md
 
-Repo-specific instructions for agents working with the `mypackage` package.
+Repo-specific instructions for agents working with the `notuv` package.
 
 ## Package Conventions
 
-- Keep importable package code under `src/mypackage/`.
-- Put CLI entrypoint behavior in `src/mypackage/cli.py`.
+- Keep importable package code under `src/notuv/`.
+- Keep CLI entrypoint behavior in `src/notuv/cli.py`.
+- Keep the console entry point named `notuv`.
+- Keep this package agnostic: do not add organization-specific, robotics-specific,
+  or machine-specific defaults.
+- Version 1 is intentionally conda-only. Do not add uv or other environment
+  backends until the conda-backed overlay workflow is proven useful.
 
 ## Validation
 
-- Run checks relevant to the files changed.
-- For README/docs-only changes, run formatting and pre-commit hygiene.
-- For Python or packaging changes, also run Ruff, mypy, pytest, and build
-  checks.
+- For Python or packaging changes, run Ruff, mypy, pytest, and a package build
+  check when feasible.
+- Keep tests focused on config parsing, command construction, failure messages,
+  and the small public command surface.
 
 ## Pull Requests
 
