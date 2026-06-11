@@ -1,4 +1,13 @@
-# notuv
+# notuv — deprecated
+
+> **notuv is deprecated.** Use [veneer](https://github.com/alik-git/veneer-py) instead:
+> ```
+> uv tool install veneer-py
+> veneer <same arguments>
+> ```
+> veneer is a drop-in replacement. Rename `notuv.toml` → `veneer.toml` and change `[notuv]` → `[veneer]`.
+
+---
 
 Editable Python installs in git worktrees without copying heavy dependencies.
 

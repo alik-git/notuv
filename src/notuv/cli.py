@@ -16,6 +16,13 @@ from notuv.config import NotuvConfig, NotuvError, load_config
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+_DEPRECATION_NOTICE = (
+    "WARNING: notuv is deprecated and will not receive further updates.\n"
+    "Use veneer instead:\n"
+    "  uv tool install veneer-py\n"
+    "  veneer <same arguments>"
+)
+
 _CONDA_LAUNCHER = """
 import os
 import subprocess
@@ -62,6 +69,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _main(args: list[str]) -> int:
+    print(_DEPRECATION_NOTICE, file=sys.stderr)
+
     if not args or args[0] in {"-h", "--help"}:
         _print_help()
         return 0
@@ -389,6 +398,7 @@ def _print_help() -> None:
     )
     parser.print_help()
     print(
+        f"\n{_DEPRECATION_NOTICE}\n"
         "\nExamples:\n"
         "  notuv info\n"
         "  notuv update-editables\n"
